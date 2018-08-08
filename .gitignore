@@ -1,0 +1,6 @@
+venv
+.idea
+local.py
+.pyc
+__pycache__
+results.json
