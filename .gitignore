@@ -3,4 +3,4 @@ venv
 local.py
 .pyc
 __pycache__
-results.json
+*.json

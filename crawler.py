@@ -12,12 +12,12 @@ class Crawler:
         self.website = website
         self.netloc = urlsplit(website).netloc
         self.pages = {}
-        self.queue = Queue()
-        self.queue.put(initial_page)
+        self.queue = set()
+        self.queue.add(initial_page)
 
     def run(self):
-        while not self.queue.empty():
-            nxt = self.queue.get()
+        while len(self.queue):
+            nxt = self.queue.pop()
             logging.debug(f"Get {nxt} from task queue")
             self.get_page(nxt)
 
@@ -27,6 +27,10 @@ class Crawler:
     def get_page(self, url):
         normalized_url = self.normalize(url)
         if normalized_url not in self.pages:
+            headers = requests.head(url)
+            if "text/html" not in headers.headers['content-type']:
+                return
+
             page = requests.get(url)
             logging.debug(f"Got {url} [{page.status_code}]")
 
@@ -40,11 +44,11 @@ class Crawler:
 
             for link in links:
                 if link not in self.pages:
-                    self.queue.put(link)
+                    self.queue.add(link)
 
     def parse_page(self, html_page):
         soup = BeautifulSoup(html_page, "lxml")
-        links = []
+        links = set()
         for raw_link in soup.findAll('a'):
             link = raw_link.get('href')
             params = urlsplit(link)
@@ -52,8 +56,8 @@ class Crawler:
             if params.scheme == "mailto":
                 continue
             if netloc == "" or netloc == self.netloc:
-                links.append(self.normalize(link))
+                links.add(self.normalize(link))
         return links
 
     def normalize(self, url):
-        return urljoin(self.website, url).rstrip('/')
+        return urljoin(self.website, url).rstrip('/').rsplit("#")[0]
