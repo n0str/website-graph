@@ -1,9 +1,9 @@
 import json
 import logging
+from urllib.parse import urlsplit, urljoin
 import requests
-from queue import Queue
-from urllib.parse import urlsplit, urljoin, urlparse
 from bs4 import BeautifulSoup
+from db import Page
 
 
 class Crawler:
@@ -13,44 +13,54 @@ class Crawler:
         self.netloc = urlsplit(website).netloc
         self.pages = {}
         self.queue = set()
-        self.queue.add(initial_page)
+        self.initial_page = initial_page
+        Page.create_table()
+        self.id = 1
 
     def run(self):
+        self.load()
+        if not self.queue:
+            self.queue.add(self.initial_page)
         while len(self.queue):
             nxt = self.queue.pop()
             logging.debug(f"Get {nxt} from task queue")
             self.get_page(nxt)
 
-        with open("results.json", "w") as w:
-            w.write(json.dumps(self.pages))
-
     def get_page(self, url):
         normalized_url = self.normalize(url)
         if normalized_url not in self.pages:
             headers = requests.head(url)
-            if "text/html" not in headers.headers['content-type']:
-                return
+            content_type = headers.headers.get('content-type', '')
 
-            page = requests.get(url)
-            logging.debug(f"Got {url} [{page.status_code}]")
-
-            links = [self.normalize(link) for link in self.parse_page(page.content)]
-
-            self.pages[normalized_url] = {
-                'url': normalized_url,
-                'status': page.status_code,
-                'links': links
-            }
-
-            for link in links:
-                if link not in self.pages:
-                    self.queue.add(link)
+            if "text/html" in content_type:
+                page = requests.get(url)
+                logging.debug(f"Got {url} [{page.status_code}]")
+                links = [self.normalize(link) for link in self.parse_page(page.content)]
+                Page.create(id=self.id,
+                            url=normalized_url,
+                            status=page.status_code,
+                            content_type=content_type,
+                            links=json.dumps(links))
+                self.pages[normalized_url] = None
+                for link in links:
+                    if link not in self.pages:
+                        self.queue.add(link)
+            else:
+                logging.debug(f"Add {url} with content_type: {content_type}")
+                Page.create(id=self.id,
+                            url=normalized_url,
+                            status=headers.status_code,
+                            content_type=content_type,
+                            links=json.dumps({}))
+            self.id += 1
 
     def parse_page(self, html_page):
         soup = BeautifulSoup(html_page, "lxml")
         links = set()
-        for raw_link in soup.findAll('a'):
-            link = raw_link.get('href')
+        raw_links = set([l.get('href') for l in soup.findAll('a')]) | set([l.get('href') for l in soup.findAll('link')]) \
+                    | set([l.get('href') for l in soup.findAll('script')])
+
+        for link in raw_links:
             params = urlsplit(link)
             netloc = params.netloc
             if params.scheme == "mailto":
@@ -61,3 +71,18 @@ class Crawler:
 
     def normalize(self, url):
         return urljoin(self.website, url).rstrip('/').rsplit("#")[0]
+
+    def load(self):
+        max_id = 1
+        visited_links = set()
+        all_links = set()
+
+        for page in Page.select():
+            if page.id > max_id:
+                max_id = page.id
+            visited_links.add(page.url)
+            for link in json.loads(page.links):
+                all_links.add(link)
+
+        self.pages = {l: None for l in visited_links}
+        self.queue = all_links - visited_links
