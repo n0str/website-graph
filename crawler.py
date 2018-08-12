@@ -15,10 +15,10 @@ class Crawler:
         self.queue = set()
         self.initial_page = initial_page
         Page.create_table()
-        self.id = 1
+        self.id = -1
 
     def run(self):
-        self.load()
+        self.id = self.load() + 1
         if not self.queue:
             self.queue.add(self.initial_page)
         while len(self.queue):
@@ -56,6 +56,10 @@ class Crawler:
 
     def parse_page(self, html_page):
         soup = BeautifulSoup(html_page, "lxml")
+        # hack for ifmo.su to remove random articles
+        # res = soup.find('ul', {'class': 'random_articles'})
+        # if res:
+        #     res.extract()
         links = set()
         raw_links = set([l.get('href') for l in soup.findAll('a')]) | set([l.get('href') for l in soup.findAll('link')]) \
                     | set([l.get('href') for l in soup.findAll('script')])
@@ -86,3 +90,4 @@ class Crawler:
 
         self.pages = {l: None for l in visited_links}
         self.queue = all_links - visited_links
+        return max_id
