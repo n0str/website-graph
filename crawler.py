@@ -4,6 +4,7 @@ from urllib.parse import urlsplit, urljoin
 import requests
 from bs4 import BeautifulSoup
 from db import Page
+from selenium_test import get_page_source
 
 
 class Crawler:
@@ -33,9 +34,24 @@ class Crawler:
             content_type = headers.headers.get('content-type', '')
 
             if "text/html" in content_type:
-                page = requests.get(url)
+                try:
+                    page = requests.get(url)
+                except Exception as e:
+                    logging.error(f"Requests get exception: {e}")
+                    Page.create(id=self.id, url=normalized_url, status=headers.status_code, content_type=content_type,
+                                links=json.dumps([]))
+                    self.id += 1
+                    return
+
                 logging.debug(f"Got {url} [{page.status_code}]")
-                links = [self.normalize(link) for link in self.parse_page(page.content)]
+
+                try:
+                    page_content = get_page_source(url)
+                except Exception as e:
+                    logging.error(f"Got selenium error: [{e}]")
+                    page_content = page.content
+
+                links = [self.normalize(link) for link in self.parse_page(page_content)]
                 Page.create(id=self.id,
                             url=normalized_url,
                             status=page.status_code,
@@ -65,7 +81,9 @@ class Crawler:
                     | set([l.get('href') for l in soup.findAll('script')])
 
         for link in raw_links:
-            params = urlsplit(link)
+            if not link:
+                continue
+            params = urlsplit(link.strip())
             netloc = params.netloc
             if params.scheme == "mailto":
                 continue
